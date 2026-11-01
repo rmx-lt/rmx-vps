@@ -8,7 +8,7 @@ REPO=$(cd "$(dirname "$0")/../.." && pwd)
 CI=$REPO/ansible/ci/rmx-ci.sh
 IMAGE=$(sed -n 's/^ *image: \(timescale\/timescaledb:.*\)/\1/p' "$REPO/services/probe/compose.yaml")
 WORK=$(mktemp -d)
-trap 'docker rm -f probe-db >/dev/null 2>&1 || true; rm -rf "$WORK" "$REPO/services/mosquitto/data"' EXIT
+trap 'docker rm -f probe-db >/dev/null 2>&1 || true; rm -rf "$WORK" "$REPO/services/mosquitto/data" "$REPO/services/caddy/firmware"' EXIT
 
 psql() { docker exec -i probe-db psql -U probe -d "${DB:-probe}" -v ON_ERROR_STOP=1 -tA "$@"; }
 
@@ -28,20 +28,24 @@ echo "before: $before"
 
 mkdir -p "$REPO/services/mosquitto/data/store"
 echo "retained-message-store" >"$REPO/services/mosquitto/data/store/mosquitto.db"
+mkdir -p "$REPO/services/caddy/firmware/probe"
+echo "firmware-image" >"$REPO/services/caddy/firmware/probe/app.bin"
 
 RMX_REPO=$REPO "$CI" backup >"$WORK/backup.tar.gz"
 listing=$(tar -tzf "$WORK/backup.tar.gz")
 grep -qx './probe.dump' <<<"$listing"
 grep -q 'services/mosquitto/data/store/mosquitto.db' <<<"$listing"
+grep -q 'services/caddy/firmware/probe/app.bin' <<<"$listing"
 
 psql -q -c "DELETE FROM readings WHERE v > 10" -c "INSERT INTO readings VALUES (now(), -1)" >/dev/null
-rm "$REPO/services/mosquitto/data/store/mosquitto.db"
+rm "$REPO/services/mosquitto/data/store/mosquitto.db" "$REPO/services/caddy/firmware/probe/app.bin"
 echo "damaged: $(psql -c 'SELECT count(*), sum(v) FROM readings')"
 
-RMX_REPO=$REPO "$CI" restore "$WORK/backup.tar.gz"
+RMX_REPO=$REPO RMX_ADMIN=root "$CI" restore "$WORK/backup.tar.gz"
 after=$(psql -c "SELECT count(*), sum(v) FROM readings")
 echo "after:  $after"
 [[ $before == "$after" ]] || { echo "FAIL: data differs after restore" >&2; exit 1; }
 [[ $(psql -c "SELECT count(*) FROM timescaledb_information.hypertables") == 1 ]] || { echo "FAIL: hypertable lost" >&2; exit 1; }
 [[ $(cat "$REPO/services/mosquitto/data/store/mosquitto.db") == retained-message-store ]] || { echo "FAIL: mosquitto store not restored" >&2; exit 1; }
+[[ $(cat "$REPO/services/caddy/firmware/probe/app.bin") == firmware-image ]] || { echo "FAIL: firmware not restored" >&2; exit 1; }
 echo "OK: backup and restore round trip"
