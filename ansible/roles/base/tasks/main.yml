@@ -9,7 +9,7 @@
 
 - name: Packages the setup uses
   ansible.builtin.apt:
-    name: [openssh-server, unattended-upgrades, ufw, fail2ban, git, curl, ca-certificates, openssl, gnupg]
+    name: [openssh-server, unattended-upgrades, ufw, fail2ban, git, curl, ca-certificates, openssl, gnupg, ansible-core, python3-apt]
     state: present
 
 - name: Remove packages nothing here uses
