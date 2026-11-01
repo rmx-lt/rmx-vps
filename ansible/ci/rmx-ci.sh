@@ -48,7 +48,9 @@ restore() {
 	local file=${1:-}
 	[[ -f $file ]] || die "usage: rmx-ci restore BACKUP.tar.gz"
 	mk_tmp
-	tar -xzf "$file" -C "$TMP" ./probe.dump "${REPO#/}/services/mosquitto/data/store" 2>/dev/null || true
+	local rel=${REPO#/}
+	tar -xzf "$file" -C "$TMP" ./probe.dump "$rel/services/mosquitto/data/store" \
+		"$rel/services/caddy/firmware" "$rel/services/probe/.env" 2>/dev/null || true
 
 	if [[ -f $TMP/probe.dump ]]; then
 		running "$DB_CONTAINER" || die "$DB_CONTAINER is not running (start the probe: ./bootstrap.sh -e probe=on)"
@@ -68,7 +70,28 @@ restore() {
 		log "no database dump in this backup"
 	fi
 
-	local store=$TMP/${REPO#/}/services/mosquitto/data/store
+	# OTA images served by Caddy: owned by the admin user, read-only for Caddy.
+	local fw=$TMP/$rel/services/caddy/firmware
+	if [[ -d $fw ]]; then
+		mkdir -p "$REPO/services/caddy/firmware"
+		cp -a "$fw/." "$REPO/services/caddy/firmware/"
+		chown -R "$ADMIN:$ADMIN" "$REPO/services/caddy/firmware"
+		log "firmware images restored"
+	fi
+
+	# The probe image that was deployed, not the (possibly older) one in the vault.
+	local tag
+	tag=$(sed -n 's/^PROBE_TAG=//p' "$TMP/$rel/services/probe/.env" 2>/dev/null | head -n1 || true)
+	if [[ $tag =~ ^sha-[0-9a-f]{7}$ ]]; then
+		if running probe-app; then
+			/usr/local/sbin/rmx-deploy-probe "$tag"
+			log "probe image set to $tag"
+		else
+			log "probe is not running: deploy $tag later with rmx-deploy-probe"
+		fi
+	fi
+
+	local store=$TMP/$rel/services/mosquitto/data/store
 	if [[ -d $store ]]; then
 		local dest=$REPO/services/mosquitto/data/store was_up=false
 		if running rmx-mosquitto-1; then
