@@ -7,10 +7,21 @@
     state: directory
     mode: "0755"
 
-- name: Docker's apt signing key
-  ansible.builtin.get_url:
+# Fetched with uri and written with copy (not get_url): get_url in --check mode
+# does not download, compares the file with an empty temp file and always
+# reports "changed" (rmx-vps#21). copy compares real content.
+- name: Docker's apt signing key (download)
+  ansible.builtin.uri:
     url: https://download.docker.com/linux/ubuntu/gpg
+    return_content: true
+  register: docker_key_src
+  check_mode: false
+  changed_when: false
+
+- name: Docker's apt signing key
+  ansible.builtin.copy:
     dest: /etc/apt/keyrings/docker.asc
+    content: "{{ docker_key_src.content }}"
     mode: "0644"
   register: docker_key
 
